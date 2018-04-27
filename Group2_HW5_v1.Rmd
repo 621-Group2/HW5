@@ -126,7 +126,7 @@ glimpse(wine_data)
 
 ##Descriptive Statistics
 
-Descriptive statistics were performed for all predictor and response variables to explore the data. Some of our predictors are numerical continuous (such as `VolatileAcidity` or `Density`), while others are numerical discreet (such as `LabelAppeal` or `TARGET`). There are no categorical variables in this data set.
+Descriptive statistics were performed for all predictor and response variables to explore the data. Some of our predictors are numerical continuous (such as `VolatileAcidity` or `Density`), while others are numerical discrete (such as `LabelAppeal` or `TARGET`). There are no categorical variables in this data set.
 
 We will now look at the summary of descriptive statistics:
 ```{r}
@@ -174,7 +174,7 @@ x
 ```
 
 ####Alcohol
-COMMENTS
+There does not appear to be any skew and seems to have a leptokurtic distribution.
 ```{r}
 par(mfrow=c(1,2))
 alcohol_density <- density(wine_data$Alcohol, na.rm=TRUE)
@@ -313,7 +313,7 @@ x <- get_outliers(wine_data$STARS)
 x
 ```
 
-#### Sulphates
+####Sulphates
 COMMENTS
 ```{r}
 par(mfrow=c(1,2))
@@ -374,7 +374,7 @@ x
 
 ##Correlation Analysis
 
-The correlation matrix shown below highlights correlations among several predictor variables. Correlation between between `Target` and `Stars` is high at 0.6. The second highest correlation is between the `Target` variable and `Label Appeal`.
+The correlation matrix shown below highlights correlations among several predictor variables. Correlation between between `Target` and `Stars` is high at 0.6. The second highest correlation is between the `Target` variable and `Label Appeal` at 0.4.
 
 
 
@@ -420,7 +420,7 @@ usdm::vifcor(numeric_fields)
 
 ##Missing Values
 
-8 out of 15 variables contain missing values. The predictor `ResidualSugar`contains 616 (5%) missing values, `Chlorides` with 638 (5%), `FreeSulfurDioxide` with 647 (5%), `TotalSulfurDioxide` at 682 (5%), `pH` with 395 (3%) missing values, `Sulphates` with `1,210` (9%), `Alcohol` with 653, and `STARS` with 3,359 (26%) missing values .
+8 out of 15 variables contain missing values. The predictor `ResidualSugar`contains 616 (5%) missing values, `Chlorides` with 638 (5%), `FreeSulfurDioxide` with 647 (5%), `TotalSulfurDioxide` with 682 (5%), `pH` with 395 (3%), `Sulphates` with `1,210` (9%), `Alcohol` with 653 (5%), and `STARS` with 3,359 (26%) missing values .
 
 The visualization of missing values below shows that missing values of `ResidualSugar`, `Chlorides` and YOJ are at 6 percent while INCOME is at 5 percent. The dataset was imputed to account for the missing values.
 
