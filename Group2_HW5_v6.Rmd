@@ -1,0 +1,1360 @@
+---
+title: "Assignment/HW5"
+author: "Group 2"
+date: "April 19, 2018"
+output: html_document
+---
+Overview
+In this homework assignment we explore, analyze, and model a data set containing information on approximately 12,000 commercially available wines. The variables are mostly related to the chemical properties of the wine being sold. The response variable is the number of sample cases of wine that were purchased by wine distribution companies after sampling a wine. These cases would be used to provide tasting samples to restaurants and wine stores around the United States. The more sample cases purchased, the more likely is a wine to be sold at a high end restaurant. 
+
+A large wine manufacturer is studying the data in order to predict the number of wine cases ordered based upon the wine characteristics. If the wine manufacturer can predict the number of cases, then it will be able to adjust their wine offering to maximize sales.
+
+Our objective is to build a count regression model to predict the number of cases of wine that will be sold
+given certain properties of the wine. 
+```{r libraries, echo=FALSE, message=FALSE, warning=FALSE}
+library(psych)
+library(GGally)
+#library(ggplot2)
+library(reshape)
+library(VIM)
+library(mice)
+#library(stringr)
+#library(dplyr)
+library(car)
+library(usdm)
+library(tidyverse)
+#library(stringr)
+library(DataExplorer)
+library(knitr)
+library(corrplot)
+library(MASS)
+#library(tinytex)
+library(ggfortify)
+library(caret)
+library(pROC)
+library(robust)
+library(robustbase)
+library(pscl)
+library(MKmisc)
+library(Metrics)  # for lm metric calculation
+library(gvlma)  ## only used for confirming model assumptions
+library(arm)    ## POisson 
+library(DHARMa) ## POisson Plot
+
+
+options(scipen=999)
+```
+#1. Data Exploration
+
+The data were loaded into a Github repository for better reproducability. After taking a quick look at the head of the data, there are a number of `NA`'s we will have to deal with. We will also remove the `INDEX` column as it will not be useful in our analysis. 
+
+```{r Loading_Data, echo=FALSE, message=FALSE, warning=FALSE}
+
+wine_data_I <- read.csv("https://raw.githubusercontent.com/621-Group2/HW5/master/wine-training-data.csv")
+
+# create a duplicate to remove index
+wine_data <- wine_data_I
+head(wine_data)
+#Removing Index Variable
+wine_data$INDEX <- NULL
+```
+
+```{r Outliers_Function, echo=FALSE, message=FALSE, warning=FALSE}
+
+# get_outliers function
+get_outliers <-  function(x, n = 10) {
+  
+  bp <- boxplot.stats(x)
+  
+  obs_hi <- unique(x[which(x > bp$stats[5])])
+
+  if (length(obs_hi) < n) 
+    
+    { n <- length(obs_hi) }
+
+    hi <- sort(obs_hi, decreasing = T)[1:n]
+  
+    obs_low <- unique(x[which(x < bp$stats[1])])
+
+  if (length(obs_low) < n) 
+    
+    { n <- length(obs_low) }
+
+    low <- sort(obs_low, decreasing = T)[1:n]
+
+  return (list(Hi=hi, Low=low))
+  
+}  
+```
+
+
+##Data Exploration and Statistic Measures
+
+The purpose of the data exploration and statistic measures phase is to understand the data to determine how to process the dataset for modelling.
+```{r Variables_List, echo=FALSE, message=FALSE, warning=FALSE}
+
+variable_names <- c("Target", "AcidIndex", "Alcohol", "Chlorides", 
+                    "CitricAcid", "Density", "FixedAcidity", "FreeSulfurDioxide", "LabelAppeal", 
+                    "ResidualSugar", "Stars", "Sulphates", "TotalSulfurDioxide", "VolatileAcidity", "pH")
+
+description <- c(  "Number of cases purchased", 
+                   "Proprietary method of testing total acidity of wine by using a weighted average", 
+                   "Alcohol content", 
+                   "Chloride content of wine",
+                   "Citric acid content",
+                   "Density of wine",
+                   "Fixed acidity of wine",
+                   "Sulfur dioxide content of wine",
+                   "Marketing score indidcating appeal of label design for consumers. Positive is like, negative is dislike",
+                   "Resdiual sugar of wine",
+                   "Wine rating by a team of experts. 4 stars = Excellent, 1 star = Poor",
+                   "Sulfate content of wine",
+                   "Total sulfur dioxide of wine",
+                   "Volatile acid content of wine",
+                   "pH of wine")
+
+variable_type <-c("Response", "Predictor", "Predictor", "Predictor", "Predictor", 
+                  "Predictor", "Predictor", "Predictor", "Predictor", "Predictor", 
+                  "Predictor", "Predictor", "Predictor",  "Predictor",  "Predictor")
+
+#data_type <- c("quantitative", "quantitative", "quantitative", "quantitative", "quantitative", 
+#               "quantitative", "quantitative", "quantitative", "categorical", "quantitative", 
+#               "categorical", "quantitative", "quantitative", "quantitative", "quantitative")
+
+wine_descriptions <- cbind.data.frame(variable_names, description, variable_type)
+
+colnames(wine_descriptions) <- c("Variable Name", "Description", "Variable Type") 
+
+kable(wine_descriptions)
+```
+
+
+The training set has 12,795 observations on 1 response and 14 predictor variables, representing certain charachteristics about a bottle of wine.
+
+```{r Variables_glimpse, echo=FALSE, message=FALSE, warning=FALSE}
+
+glimpse(wine_data)
+```
+
+###Descriptive Statistics
+
+Descriptive statistics were performed for all predictor and response variables to explore the data. Some of our predictors are numerical continuous (such as `VolatileAcidity` or `Density`), while others are numerical discrete (such as `LabelAppeal` or `TARGET`). There are no categorical variables in this data set.
+
+We will now look at the summary of descriptive statistics:  
+
+```{r Descriptive_Statistics, echo=FALSE, message=FALSE, warning=FALSE}
+
+#Calculate mean missing values per variable
+missing_values <- wine_data %>% 
+  summarize_all(funs(sum(is.na(.))))
+
+missing_values_ratio <- wine_data %>% 
+  summarize_all(funs(sum(is.na(.)) / length(.)*100))
+
+#Use Describe Package to calculate Descriptive Statistic
+(wine_data_des <- describe(wine_data, na.rm=TRUE, interp=FALSE, skew=TRUE, ranges=TRUE, trim=.1, type=3, check=TRUE, fast=FALSE, quant=c(.25,.75), IQR=TRUE))
+
+wine_data_des$missing <- t(missing_values)
+wine_data_des$miss_ratio <- t(round(missing_values_ratio,4))
+
+wine_data_des_display <- wine_data_des %>% 
+  dplyr::select(n, missing, miss_ratio, mean, sd, min, max, skew, kurtosis, median, IQR, Q0.25, Q0.75)
+
+knitr::kable(wine_data_des_display)
+```
+
+###Quality of the Data  
+
+From the summary of the data statistic, we can see that we may have a problem with the quality of the data.  Not only we have missing values for variables: ResiudalSugar, Chlorides, FreeSulfurDioxide, TotalSulfurDioxide, pH, Sulphates, Alcohol, and STARS, but we have range of values that do not make sense for the type of data we have.  Chemical component of wine such as Alcohol level, ResidualSugar, CitricAcid, FixedAcidity, VolatileAcidity, Chlorides, Sulphates,  FreeSulphurDioxide, TotalSulfurDioxide cannot have negative values.  
+
+Based on some research and in consultation with a wine connoisseur, we compile the information on the predictors.  
+
+***Acid Index:*** Acid Index is a proprietary method of testing total acidity of wine by using a weighted average.  
+Range: Unkown
+
+***Fixed Acidity:*** Fixed Acidity in wine cannot be evaporated (as opposed to Volatile Acidity) is most constituated of Tartaric acid and Malic acid. Fixed Acidity will provide the tartness to the wine which is part of its characteristic.  Tartaric and Malic acid are produced by the grapes and are highly dependent on the weather; grapes grown in cool weather will produce high level of acidity (and low level of sugar) while grapes produced in warm level with have low level of acidity and high level of sugar.  
+Typically measured in g/dm^3  
+Tartaric Acid: 1 - 4 g/dm^3
+Malic Acid: 0 - 8 g/dm^3  
+
+In addition, wine could have level of succinic acid, which is produced by yeast during the fermentation process, range: 0.5 - 2 g/dm^3.  
+
+***Citric Acid:*** Citric Acid is considered a fixed Acid (see above). Grape contains very low level of citric acid and most, if not all of the citric acid naturally present in the grapes is consumed by bacteria during fermentation. Many winemakers use citric acid to acidify wines that are too basic and as a flavor additive. Citric Acid is what would give wine a "freshness".
+Typically measured in g/dm^3  
+Range: 0 - 0.5 g/dm^3  
+
+***Volatile Acidity:*** Volatile acidity in wine is due predominently to acetic acid (Vinegar), it evaporates hence volatile and is produced as part of the fermenation process.  
+Typically measured in g/dm^3  
+Range: negligeable to 3 g/dm^3  
+
+U.S. legal limits of Volatile Acidity:   
+Red Table Wine 1.2 g/dm^3  
+White Table Wine 1.1 g/dm^3  
+
+***pH:*** pH is a measure of a solution's acidity and is measured on a logarithm scale. Hence a wine with a pH of 3 is 10 times more acidic than a wine with a pH of 4. It is a scale from 0 - 14 with the lower the number the more acidic the compound.  pH of 7 is neutral.  
+
+![pH Scale for drinks](acidity-ph-level-in-wine-and-drinks.png)  
+
+
+***Chlorides:*** Presence of Sodium Chloride in wine is largely dependent on where the grapes where grown as the grapes will absorbe the minerals from the soil. It is responsible for saltiness of the wine.  
+Typically measured in g/dm^3  
+Range: 2 - 4 g/dm^3  
+
+***Sulphates:*** Usually due to potassium sulphates.  
+Typically measured in g/dm^3  
+Range: not known, possibly less than 1 g/dm^3  
+
+***FreeSulfurDioxide:*** Free ${ SO }_{ 2 }$ is the portion of sufphite not chemically bounded to other chemical compound of wine such as aldehydes, acids, furfural, sugars, solids, yeast/bacteria, etc that are naturally present in wine. Free ${ SO }_{ 2 }$ protects wine from oxidation and microbial contamination during ageing/storage. This allows the wine to continue developing safely throughout its entire lifetime. The free ${ SO }_{ 2 }$ levels required to protect wine from oxidation and spoiliage is pH dependent; the higher the pH the higher the level of ${ SO }_{ 2 }$ required.  
+Typically measured in mg/dm^3  
+Range: varies on pH
+
+![SO2 vs pH](SO2-pH.png) 
+
+***TotalSulfurDioxide:*** Total ${ SO }_{ 2 }$ = Free ${ SO }_{ 2 }$ + bound ${ SO }_{ 2 }$.  
+Typically measured in mg/dm^3  
+Range: There is a legal limit of 350 mg/dm^3 Total ${ SO }_{ 2 }$. From a sensory point of view, Total ${ SO }_{ 2 }$ < 100 mg/dm^3. 
+
+***Alcohol:*** Alcohol in wine is the direct result of fermentation. As the sugar is consumed by yeast, alcohol, most predominantly ethanol is produced. Alcohol is measured in Alcohol by volume or ABV  
+Range for wine: 5 - 22 ABV  
+
+***Residual Sugars:*** Residual Sugars are the remaining sugars that have not been transformed as part of fremenation process. The higher the level of alcohol, the lower the residual sugars.  
+Typically measured in g/dm^3
+Range: 2 - 150
+
+***Density:*** Density is defined by the mass or weight per volume of a material. In the case of liquids, density is often measured in units of g/mL, which is the weight in grams (g) of each cm^3 of liquid. Density of water is 1. Density of wine is very closed to water.  
+Typically measured in g/cm^3  
+
+***Label Apeal:*** Marketing Score indicating the appeal of label design for consumers. High numbers suggest customers like the label design. Negative numbers suggest customes don't like the design.  
+
+***STARS:*** Wine rating by a team of experts. 4 Stars = Excellent, 1 Star = Poor  
+
+***TARGET:*** Number of cases of wine purchased. Our response variable.  
+
+Now that we have a better understanding of each predictor and response variable and typical range, let us examine the negative values in our data set.  
+
+```{r negative_values, echo=FALSE, message=FALSE, warning=FALSE}
+
+# create a new data set for negative analysis
+wine_data_neg2 <- wine_data
+has.neg <- apply(wine_data_neg2, 1, function(row) any(row < 0)) 
+
+neg_percent <- round((length(which(has.neg))/nrow(wine_data_neg2))*100,2)
+```
+
+We have `r neg_percent` of rows in our data set that have at least one negative values.  
+
+We have several possibilities on how to deal with these negative entries.
+
+1. Remove any rows from data set with a negative entry    
+2. Set these negative entries to NA and impute the data  
+3. For the variables with negatvie values, we could offset all the values by set number that would displaced the whole distribution to the rigth.
+4. Switch the sign of every negative values  
+
+We will examine each method and determine which is the best appraoch for this data set.
+
+####1.Remove any rows with a negative entry  
+Since we have over 89 percent of our data with at least one negative entries, this approach is not a viable one.  
+
+####2. Set negative entries to NA and Impute  
+As we could see with already have quite a bit of data with NA. We will attempt this approach.  
+
+```{r Negative_value_2nd approach, echo=FALSE, message=FALSE, warning=FALSE}
+
+#Set negative values to NA
+wine_data_neg2$FixedAcidity[wine_data_neg2$FixedAcidity < 0] <- NA
+wine_data_neg2$VolatileAcidity[wine_data_neg2$VolatileAcidity < 0] <- NA
+wine_data_neg2$CitricAcid[wine_data_neg2$CitricAcid < 0] <- NA
+wine_data_neg2$Chlorides[wine_data_neg2$Chlorides < 0] <- NA
+wine_data_neg2$FreeSulfurDioxide[wine_data_neg2$FreeSulfurDioxide < 0] <- NA
+wine_data_neg2$TotalSulfurDioxide[wine_data_neg2$TotalSulfurDioxide < 0] <- NA
+wine_data_neg2$ResidualSugar[wine_data_neg2$ResidualSugar < 0] <- NA
+wine_data_neg2$Alcohol[wine_data_neg2$Alcohol < 0] <- NA
+wine_data_neg2$Sulphates[wine_data_neg2$Sulphates < 0] <- NA
+
+kable(sapply(wine_data_neg2, function(x) sum(is.na(x))))
+
+plot_missing(wine_data_neg2, title="Wine Dataset - Missing Values (%)")
+
+ggplot(stack(wine_data_neg2), aes(values))+
+  facet_wrap(~ind, scales = "free") + 
+  geom_histogram(fill = "light blue", colour="black") +
+  theme(legend.position="none")
+```
+```{r Side_by_Side BoxPlot, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(stack(wine_data_neg2), aes(x = ind, y = values, fill=ind))+
+  facet_wrap(~ind, scales = "free") + 
+  geom_boxplot() +
+  theme(legend.position="none")
+
+```
+
+The residual histograms indicate that a few of the distributions (without the negative and NA values) are skewed; Fixed Acidity, Volatile Acidity, Free SulfurDioxide, Total SulfurDioxide, Citric Acid, Residual Sugar, Chlorides, and Sulphates have a skeweed distribution. This may prove a problem if we choose to take this approach and impute the data with Mice package since its algorithms are sensitive to skewness of the data.  
+
+####3. Add an Offset to shift distribution to the right  
+In this approach, we would offset each values for the variables with negative by a common number to shift the distribution into a valid range for this variable. Let us consider the variable Alcohol.  The lowest negative value for this variable is `r min(wine_data$alcohol, na.rm=TRUE)`.  
+
+To bring this value in the lower range of the Alcohol level for wine (5), we would need to offset it by about 9, or at the very least 8. This would force the highest value for this variable, currently `r max(wine_data$alcolhol, na.rm=TRUE)` to `r  max(wine_data$Alcohol, na.rm = TRUE) + 8`, which is very much outside the valid range for this variable.  
+
+Similarly for other variables, hence offsetting each variables is not a vaviable solution.  
+
+####4. Switching Negative Entries to positive  
+In this approach, we would just switch each negative entries by their corresponding positive by multiplying each negative entries by -1. This is a very arbitrary solution and since we have absolutely no idea how the corruption of the data set took place; Invalid measuring of various chemical compound, misscalibration of the measuring isntruments, sabotage... and we were not able to gain additional information on how the data set was collected. This appraoch seemed to be riskier than the imputation approach.  
+
+```{r negative_values 4th approach, echo=FALSE, message=FALSE, warning=FALSE}
+
+wine_data_neg4 <- wine_data
+
+wine_data_neg4$FixedAcidity <- ifelse( wine_data_neg4$FixedAcidity < 0, wine_data_neg4$FixedAcidity*(-1), wine_data_neg4$FixedAcidity)
+wine_data_neg4$VolatileAcidity <- ifelse( wine_data_neg4$VolatileAcidity < 0, wine_data_neg4$VolatileAcidity*(-1), wine_data_neg4$VolatileAcidity)
+wine_data_neg4$CitricAcid <- ifelse( wine_data_neg4$CitricAcid < 0, wine_data_neg4$CitricAcid*(-1), wine_data_neg4$CitricAcid)
+wine_data_neg4$Chlorides <- ifelse( wine_data_neg4$Chlorides < 0, wine_data_neg4$Chlorides*(-1), wine_data_neg4$Chlorides)
+wine_data_neg4$Sulphates <- ifelse( wine_data_neg4$Sulphates < 0, wine_data_neg4$Sulphates*(-1), wine_data_neg4$Sulphates)
+wine_data_neg4$FreeSulfurDioxide <- ifelse( wine_data_neg4$FreeSulfurDioxide < 0, wine_data_neg4$FreeSulfurDioxide*(-1), wine_data_neg4$FreeSulfurDioxide)
+wine_data_neg4$TotalSulfurDioxide <- ifelse( wine_data_neg4$TotalSulfurDioxide < 0, wine_data_neg4$TotalSulfurDioxide*(-1), wine_data_neg4$TotalSulfurDioxide)
+wine_data_neg4$ResidualSugar <- ifelse( wine_data_neg4$ResidualSugar < 0, wine_data_neg4$ResidualSugar*(-1), wine_data_neg4$ResidualSugar)
+wine_data_neg4$Alcohol <- ifelse( wine_data_neg4$Alcohol < 0, wine_data_neg4$Alcohol*(-1), wine_data_neg4$Alcohol)
+
+ggplot(stack(wine_data_neg4), aes(values))+
+  facet_wrap(~ind, scales = "free") + 
+  geom_histogram(fill = "light blue", colour="black") +
+  theme(legend.position="none")
+
+```
+
+The resulting histograms indicate that a few of the distributions mainly Fixed Acidity, Volatile Acidity, Citric Acid, Residual Sugar, Chlorides, Free Sulfur Dioxide, Total Sulfur Dioxide, Sulphates are right skweed but seemed consistent with the distributions without negative values and NA.  
+
+Although we are concerns on imputing about 30% of the data for some variables, since we have no insight on how the data was corrupted.  There is no indication of calibration errors or equipment failure and although there does not seemed to be a patern the the negative data, the percentage of incorrect data is too high to be only the result of data entry error.  We will therefore pursue imputation of the negative data after replacing them with NA.
+
+We need to consider the case of missing data prior to imputation and devise a strategy for these was well.  
+
+
+###Missing Values
+
+8 out of 15 variables contain missing values. The predictor `ResidualSugar`contains 616 (5%) missing values, `Chlorides` with 638 (5%), `FreeSulfurDioxide` with 647 (5%), `TotalSulfurDioxide` with 682 (5%), `pH` with 395 (3%), `Sulphates` with `1,210` (9%), `Alcohol` with 653 (5%), and `STARS` with 3,359 (26%) missing values .
+
+There are a total of 8,200 `NA` values within the 12,795 observations and 15 columns, a rate of **4.27%** of the entire data set.  
+
+```{r Missing_Values_total, echo=FALSE, message=FALSE, warning=FALSE}
+
+total_na <- sum(is.na(wine_data))
+total_cells <- 12795 * 15
+round(total_na *100 / total_cells,2)
+```
+
+```{r Missing_Values_Breakdown, echo=FALSE, message=FALSE, warning=FALSE}
+
+kable(sapply(wine_data, function(x) sum(is.na(x))))
+
+plot_missing(wine_data, title="Wine Dataset - Missing Values (%)")
+```
+
+***Stars*** variable is missing 26% of data. However, if we consider that an absence of rating is significant, we consider 'NA' entries for Stars variables has "No Rating" and assign a value of zero. This will preserve the ordinal charecteristic of the variable.  
+
+For the remaining missing values, we will impute the data.  This will be done in addition to imputing the previously negative entries.  
+
+```{r Missing_Values_Grid, echo=FALSE, message=FALSE, warning=FALSE}
+#Examine missing data pattern
+#md.pattern(wine_data)
+
+#Number of missing
+aggr(wine_data, prop = T, numbers = T)
+```
+
+Before we impute the missing data, let us consider the zero values.  In this data set, a value of zero is significant.
+
+```{r Zero_Values, echo=FALSE, message=FALSE, warning=FALSE}
+
+df <- setNames(data.frame(colSums(wine_data==0, na.rm = T)), 'Count')
+           
+df$Variable <- rownames(df)
+
+rownames(df) <- NULL
+
+df %>% filter(!Variable %in% c("TARGET")) %>%  
+ggplot(aes(x=reorder(Variable, Count), y=Count, fill=Count)) +
+    geom_bar(stat="identity") + coord_flip() + guides(fill=FALSE) +
+    xlab("Variable") + ylab("Number of 0 Values") + 
+    ggtitle("Count of Zero Values by Variable") +
+    geom_text(aes(label=Count), vjust=.5, hjust=-.1,position= position_dodge(width=0.5),size=3,  color="black")
+```
+
+After Label Appeal, the variable with the most 0 values is Citric Acid, it is possible for some wine not to have any level of citric acid. It seems improbable that some wines will not 0 g/md^3 level of fixed acidity but since we have no insight on how the data was captured it is difficult to make any assumption about the rest of the 0 values.  They will be identified as outliers for each variables.  
+
+##Missing data and Negative data strategy
+
+* We will convert the missing data for variable STARS to zero value 
+* We will then convert all negative data to NA and impute all NA's using K-nearest-algorithm. We are concerned that since some of the distributions for the variables to be inputed are skewed the imputation method from MICE package will not be optimum.
+
+```{r Missing_Ratings, echo=FALSE, message=FALSE, warning=FALSE}
+
+# 1. Convert NA to 0 for STARS variable
+wine_data <- wine_data %>% mutate(STARS=replace(STARS, is.na(STARS), 0))
+
+# 2. Convert STARS and LabelAppeal into factor
+# wine_data$LabelAppeal <- as.factor(wine_data$LabelAppeal)
+# wine_data$STARS <- as.factor(wine_data$STARS)
+
+# 3. Convert Negative to NA for all other predictors
+wine_data$FixedAcidity[wine_data$FixedAcidity < 0] <- NA
+wine_data$VolatileAcidity[wine_data$VolatileAcidity < 0] <- NA
+wine_data$CitricAcid[wine_data$CitricAcid < 0] <- NA
+wine_data$Chlorides[wine_data$Chlorides < 0] <- NA
+wine_data$FreeSulfurDioxide[wine_data$FreeSulfurDioxide < 0] <- NA
+wine_data$TotalSulfurDioxide[wine_data$TotalSulfurDioxide < 0] <- NA
+wine_data$ResidualSugar[wine_data$ResidualSugar < 0] <- NA
+wine_data$Alcohol[wine_data$Alcohol < 0] <- NA
+wine_data$Sulphates[wine_data$Sulphates < 0] <- NA
+
+```
+
+
+##Impute Recoded dataset
+
+We will now impute the missing data on the recoded data set. None of the data to be imputed are categorical.
+
+```{r Missing_Data_Imputation, echo=FALSE, message=FALSE, warning=FALSE}
+
+# #Process wine data
+# wine_data_impute <- mice(wine_data,m=3,maxit=50,meth='cart',seed=500) 
+# 
+# #inspect imputed data
+# densityplot(wine_data_impute)
+# 
+# #get complete data ( 2nd out of 3)
+# wine_data_complete <- mice::complete(wine_data_impute, 2)
+
+# Due to Skweeness of some of the variable distribution to be imputed we will use kNN method.
+# 4. Impute with kNN out of VIM package
+
+wine_data_impute <- VIM::kNN(wine_data, k=5)
+
+```
+
+Let us examine the results of the imputation.
+
+```{r Imputation_Results, echo=FALSE, message=FALSE, warning=FALSE}
+
+#head(wine_data_impute)
+
+# Drop Boolean imputed indicator columns
+
+wine_data_complete <- subset(wine_data_impute, select = TARGET:STARS)
+
+#head(wine_data_complete)
+```
+
+```{r Imputation_Results_Histogram, echo=FALSE, message=FALSE, warning=FALSE}
+
+ggplot(stack(wine_data_complete), aes(values))+
+  facet_wrap(~ind, scales = "free") + 
+  geom_histogram(fill = "light blue", colour="black") +
+  theme(legend.position="none")
+```
+```{r Imputation_Results_Boxplot, echo=FALSE, message=FALSE, warning=FALSE}
+
+ggplot(stack(wine_data_complete), aes(x = ind, y = values, fill=ind))+
+  facet_wrap(~ind, scales = "free") + 
+  geom_boxplot() +
+  theme(legend.position="none")
+```
+
+
+###Analysis of individual variables
+
+We will now examined each predictor now that the problems with the data has been addressed to understand their distribution and determine whether any transformation is required.
+
+```{r Skewness, echo=FALSE, message=FALSE, warning=FALSE}
+# vb - Already displayed in table above - duplicate
+#describe(wine_data, na.rm = TRUE, IQR = TRUE) %>%
+# dplyr::select(mean, sd, IQR, range, skew, kurtosis, se)
+```
+
+####Acid Index
+The Acid Index variable is skewed to the right. There are a high number of outliers. This variable is derived by a proprietary method of testing total acidity of wine by using a weighted average. We will treat this variable as a discreet variable. We would expect this variable to be highly corelated with the other acidity variables and negatively corelated with pH.  
+
+```{r AcidIndex, echo=FALSE, message=FALSE, warning=FALSE}
+
+par(mfrow=c(1,2))
+# replace by histogram
+# acidIndex_density <- density(wine_data$AcidIndex)
+# plot(acidIndex_density, main="Acid Index")
+# polygon(acidIndex_density, col="red", border="red")
+
+ggplot(wine_data_complete, aes(x = AcidIndex)) + 
+  geom_bar(fill = "red", width = 0.7) + 
+  xlab("Acid Index ") + ylab("Frequency")
+
+boxplot(wine_data_complete$AcidIndex, main="Boxplot for Acid Index", col="blue")
+
+```
+
+***Extreme Values***  
+```{r Outliers_AcidIndex, echo=FALSE, message=FALSE, warning=FALSE}
+x <- get_outliers(wine_data_complete$AcidIndex)
+```
+
+Range  |  Values 
+-------|-------------
+Lowest | `r ifelse(is.na(x$Low), 'None', x$Low)`     
+Highest | `r ifelse(is.na(x$Hi), 'None', x$Hi)`  
+
+####Citric Acid
+Citric Acid is found only in very minute quantities in wine grapes but is sometimes added as part of wine making process. It provides a "freshness" to the wine. The distribution for this variable is symmetric with a high number of outliers. We would expect this variable to be corelated to the Acidity Index and negatively corelated to pH.  
+
+```{r Citric_Acid, echo=FALSE, message=FALSE, warning=FALSE}
+
+par(mfrow=c(1,2))
+citAcid_density <- density(wine_data_complete$CitricAcid)
+plot(citAcid_density, main="Citric Acid")
+polygon(citAcid_density, col="red", border="red")
+
+boxplot(wine_data_complete$CitricAcid, main="Boxplot of Citric Acid", col="blue")
+
+```
+
+***Extreme Values***  
+```{r Outliers_Citric_Acid, echo=FALSE, message=FALSE, warning=FALSE}
+x <- get_outliers(wine_data_complete$CitricAcid)
+```
+
+Range  |  Values 
+-------|-------------
+Lowest | `r ifelse(is.na(x$Low), 'None', x$Low)`     
+Highest | `r ifelse(is.na(x$Hi), 'None', x$Hi)`  
+
+####Fixed Acidity
+Acids are major wine constituents and contribute greatly to its taste. They impart the sourness or tartness that is a fundamental feature in wine taste. The distribution for this variable is symmetric with a high level of outliers. We would expect this variable to be highly corelated with the Acidity Index and negatively corelated with pH. 
+
+```{r Fixed_Acidity, echo=FALSE, message=FALSE, warning=FALSE}
+
+par(mfrow=c(1,2))
+fixAcid_density <- density(wine_data_complete$FixedAcidity)
+plot(fixAcid_density, main="Fixed Acidity")
+polygon(fixAcid_density, col="red", border="red")
+
+boxplot(wine_data_complete$FixedAcidity, main="Boxplot of Fixed Acidity", col="blue")
+
+```
+
+***Extreme Values***  
+```{r Outliers_Fixed_Acidity, echo=FALSE, message=FALSE, warning=FALSE}
+x <- get_outliers(wine_data_complete$FixedAcidity)
+```
+
+Range  |  Values 
+-------|-------------
+Lowest | `r ifelse(is.na(x$Low), 'None', x$Low)`     
+Highest | `r ifelse(is.na(x$Hi), 'None', x$Hi)` 
+
+####Volatile Acidity
+Volatile Acidity is a measure of the level of acetic acid in the wine. It is basically the process of wine turning into vinegar. This variable has a symmetrical distribution with a high number of outliers.  We would expect this variable to be corelated with the Acidity Index and negatively corelated wtih pH. 
+
+```{r Volatile_Acidity, echo=FALSE, message=FALSE, warning=FALSE}
+
+par(mfrow=c(1,2))
+volAcid_density <- density(wine_data_complete$VolatileAcidity)
+plot(volAcid_density, main="Volatile Acidity")
+polygon(volAcid_density, col="red", border="red")
+
+boxplot(wine_data_complete$VolatileAcidity, main="Boxplot of Volatile Acidity", col="blue")
+
+```
+
+***Extreme Values***  
+```{r Outliers_Volatile_Acidity, echo=FALSE, message=FALSE, warning=FALSE}
+
+x <- get_outliers(wine_data_complete$VolatileAcidity)
+```
+
+Range  |  Values 
+-------|-------------
+Lowest | `r ifelse(is.na(x$Low), 'None', x$Low)`     
+Highest | `r ifelse(is.na(x$Hi), 'None', x$Hi)`  
+
+
+####pH
+The pH of wine is a measure of acidity. PH varies between 0 and 14 with a value of 7 to be neutral and a value less than 7 to be acidic, the lower the pH, the higher content of acid present. we would expect this variable to be negatively corelated with acidity linked variables. Wines tends to have a pH around 3 and we can see from the distribution that our data reflect this fact. This variable has a symmetrical distribution with a high number of outliers.  
+
+```{r pH, echo=FALSE, message=FALSE, warning=FALSE}
+par(mfrow=c(1,2))
+pH_density <- density(wine_data_complete$pH, na.rm=TRUE)
+plot(pH_density, main="pH")
+polygon(pH_density, col="red", border="red")
+
+boxplot(wine_data_complete$pH, main="Boxplot for pH", col="blue")
+```
+
+***Extreme Variables***  
+```{r Outlier_pH, echo=FALSE, message=FALSE, warning=FALSE}
+x <- get_outliers(wine_data_complete$pH)
+```
+
+Range  |  Values 
+-------|-------------
+Lowest | `r ifelse(is.na(x$Low), 'None', x$Low)`     
+Highest | `r ifelse(is.na(x$Hi), 'None', x$Hi)`   
+
+####Alcohol  
+There does not appear to be any skew and seems to have a symetrical distribution. This variable indicate the level of alcohol in the wine.  
+
+```{r Alcohol, echo=FALSE, message=FALSE, warning=FALSE}
+
+par(mfrow=c(1,2))
+alcohol_density <- density(wine_data_complete$Alcohol, na.rm=TRUE)
+plot(alcohol_density, main="Alcohol")
+polygon(alcohol_density, col="red", border="red")
+
+boxplot(wine_data_complete$Alcohol, main="Boxplot for Alcohol", col="blue")
+
+```
+***Extreme Values***  
+```{r Outliers_Alcohol, echo=FALSE, message=FALSE, warning=FALSE}
+x <- get_outliers(wine_data_complete$Alcohol)
+```
+
+Range  |  Values 
+-------|-------------
+Lowest | `r ifelse(is.na(x$Low), 'None', x$Low)`     
+Highest | `r ifelse(is.na(x$Hi), 'None', x$Hi)`   
+
+####Residual Sugar  
+Residual Sugar measure the content of sugar remaining in the wine after the fermentation process took place or sugar that had been added to the wine making process to make it sweetter. A dry wine should have no perceptible sweetness. A sweet wine - such as a late-harvest type wine or icewine or desert wine - can have any level of residual sugar. 
+
+```{r Residual_Sugar, echo=FALSE, message=FALSE, warning=FALSE}
+
+par(mfrow=c(1,2))
+resSugar_density <- density(wine_data_complete$ResidualSugar, na.rm=TRUE)
+plot(resSugar_density, main="Residual Sugar")
+polygon(resSugar_density, col="red", border="red")
+
+boxplot(wine_data_complete$ResidualSugar, main="Boxplot of Residual Sugar", col="blue")
+
+```
+
+***Extreme Variables***  
+```{r Outliers_Residual_Sugar, echo=FALSE, message=FALSE, warning=FALSE}
+x <- get_outliers(wine_data_complete$ResidualSugar)
+```
+
+Range  |  Values 
+-------|-------------
+Lowest | `r ifelse(is.na(x$Low), 'None', x$Low)`     
+Highest | `r ifelse(is.na(x$Hi), 'None', x$Hi)`   
+
+#### Density
+Density of wine is very close to density of water. The distribution for this variable symmetrical with a high numbers of outliers.  
+
+```{r Density, echo=FALSE, message=FALSE, warning=FALSE}
+
+par(mfrow=c(1,2))
+dens_density <- density(wine_data_complete$Density)
+plot(dens_density, main="Density")
+polygon(dens_density, col="red", border="red")
+
+boxplot(wine_data_complete$Density, main="Boxplot of Density", col="blue")
+
+```
+
+***Extreme Values*** 
+```{r Outliers_Density, echo=FALSE, message=FALSE, warning=FALSE}
+x <- get_outliers(wine_data_complete$Density)
+```
+
+Range  |  Values 
+-------|-------------
+Lowest | `r ifelse(is.na(x$Low), 'None', x$Low)`     
+Highest | `r ifelse(is.na(x$Hi), 'None', x$Hi)`  
+
+####Chlorides
+Chlorides level contributes to saltiness of a wine and is related to the "terroir" where the grape was grown. The distribution for this variable is symmetric with a high presence of outliers.  
+
+```{r Chlorides, echo=FALSE, message=FALSE, warning=FALSE}
+
+par(mfrow=c(1,2))
+chlorides_density <- density(wine_data_complete$Chlorides, na.rm=TRUE)
+plot(chlorides_density, main="Chlorides")
+polygon(chlorides_density, col="red", border="red")
+
+boxplot(wine_data_complete$Chlorides, main="Boxplot of Chlorides", col="blue")
+
+```
+
+***Extreme Values***  
+```{r Outliers_Chlorides, echo=FALSE, message=FALSE, warning=FALSE}
+
+x <- get_outliers(wine_data_complete$Chlorides)
+
+```
+
+Range  |  Values 
+-------|-------------
+Lowest | `r ifelse(is.na(x$Low), 'None', x$Low)`     
+Highest | `r ifelse(is.na(x$Hi), 'None', x$Hi)`   
+
+  
+
+####Free Sulfur Dioxide
+Free Sulfur Dioxide (${ SO }_{ 2 }$) (not associated with wine molecules) is effectively the buffer against microbes and oxidation. It occurs naturally in wine but is also usually added in the wine process. The distribution for this variable is symmetrical with a high number of outliers.  
+```{r Free_Sulfur_Dioxide, echo=FALSE, message=FALSE, warning=FALSE}
+
+par(mfrow=c(1,2))
+freeSulf_density <- density(wine_data_complete$FreeSulfurDioxide, na.rm=TRUE)
+plot(freeSulf_density, main="Free Sulfur Dioxide")
+polygon(freeSulf_density, col="red", border="red")
+
+boxplot(wine_data_complete$FreeSulfurDioxide, main="Boxplot of Free Sulfer Dioxide", col="blue")
+
+```
+
+*** Extreme Values***  
+```{r Outliers_Free_Sulfur_Dioxide, echo=FALSE, message=FALSE, warning=FALSE}
+
+x <- get_outliers(wine_data_complete$FreeSulfurDioxide)
+```
+
+Range  |  Values 
+-------|-------------
+Lowest | `r ifelse(is.na(x$Low), 'None', x$Low)`     
+Highest | `r ifelse(is.na(x$Hi), 'None', x$Hi)` 
+
+####Total Sulfur Dioxide
+This variabale is indicative of the total level of Sulfur Dioxide (${ SO }_{ 2 }$). It represents the bind ${ SO }_{ 2 }$ and the free ${ SO }_{ 2 }$. We would expect this variable to be highly corelated to "Free Sulfur Dioxide".  
+
+```{r Total_Sulfur_Dioxide, echo=FALSE, message=FALSE, warning=FALSE}
+
+par(mfrow=c(1,2))
+totalSulf_density <- density(wine_data_complete$TotalSulfurDioxide, na.rm=TRUE)
+plot(totalSulf_density, main="Total Sulfur Dioxide")
+polygon(totalSulf_density, col="red", border="red")
+
+boxplot(wine_data_complete$TotalSulfurDioxide, main="Boxplot of Total Sulfer Dioxide", col="blue")
+
+```
+
+***Extreme Values***  
+```{r Ouliers_Total_Sulfur_Dioxide, echo=FALSE, message=FALSE, warning=FALSE}
+
+x <- get_outliers(wine_data_complete$TotalSulfurDioxide)
+```
+
+Range  |  Values 
+-------|-------------
+Lowest | `r ifelse(is.na(x$Low), 'None', x$Low)`     
+Highest | `r ifelse(is.na(x$Hi), 'None', x$Hi)`  
+
+####Sulphates
+Level of Sulphates in wine, possibly potassium sulphates. The distribution for this variable is symmetrical with a high number of outliers.  
+
+```{r Sulphates, echo=FALSE, message=FALSE, warning=FALSE}
+
+par(mfrow=c(1,2))
+sulphate_density <- density(wine_data_complete$Sulphates, na.rm=TRUE)
+plot(dens_density, main="Sulphates")
+polygon(dens_density, col="red", border="red")
+
+boxplot(wine_data_complete$Sulphates, main="Boxplot for Sulphates", col="blue")
+
+```
+
+***Extreme Values***  
+```{r Outliers_Sulphates, echo=FALSE, message=FALSE, warning=FALSE}
+
+x <- get_outliers(wine_data_complete$Sulphates)
+```
+
+Range  |  Values 
+-------|-------------
+Lowest | `r ifelse(is.na(x$Low), 'None', x$Low)`     
+Highest | `r ifelse(is.na(x$Hi), 'None', x$Hi)`  
+
+####Label Appeal
+The variable is a measure of how appealing to customer the label is. High numbers suggest customers like the label design and negative number suggest they do not.  It is not rare to see customer buy a wine based on the label appeal. We will treat this variable as a ordered categorical variable.  
+
+```{r Label_Appeal, echo=FALSE, message=FALSE, warning=FALSE}
+
+par(mfrow=c(1,2))
+# labelAppeal_density <- density(wine_data$LabelAppeal)
+# plot(labelAppeal_density, main="Label Appeal")
+# polygon(labelAppeal_density, col="red", border="red")
+
+ggplot(wine_data_complete, aes(x = LabelAppeal)) + 
+  geom_bar(fill = "red", width = 0.7) + 
+  xlab("Label Appeal") + ylab("Frequency")
+
+boxplot(wine_data_complete$LabelAppeal, main="Boxplot for Label Appeal", col="blue")
+
+```
+***Extreme Values***  
+```{r Outliers_Label_Appeal, echo=FALSE, message=FALSE, warning=FALSE}
+x <- get_outliers(wine_data_complete$LabelAppeal)
+```
+
+Range  |  Values 
+-------|-------------
+Lowest | `r ifelse(is.na(x$Low), 'None', x$Low)`     
+Highest | `r ifelse(is.na(x$Hi), 'None', x$Hi)`   
+
+####Stars
+This variable is indicative of a rating given to a wine by a team of expert, a rating of 1 = poor and rating of 4 is excellent. We notice a high level of missing values for this variables that will be addressed in the next section. We will treat this variable as ordered categorical.  
+
+```{r Starts, echo=FALSE, message=FALSE, warning=FALSE}  
+
+par(mfrow=c(1,2))
+# stars_density <- density(wine_data$STARS, na.rm=TRUE)
+# plot(stars_density, main="Stars")
+# polygon(stars_density, col="red", border="red")
+
+ggplot(wine_data_complete, aes(x = STARS)) + 
+  geom_bar(fill = "red", width = 0.5) + 
+  xlab("Number of Stars") + ylab("Frequency")
+
+boxplot(wine_data_complete$STARS, main="Boxplot for Stars", col="blue")
+
+```
+
+***Extreme Values***  
+```{r Outliers_Stars, echo=FALSE, message=FALSE, warning=FALSE}
+x <- get_outliers(wine_data_complete$STARS)
+```
+
+Range  |  Values 
+-------|-------------
+Lowest | `r ifelse(is.na(x$Low), 'None', x$Low)`     
+Highest | `r ifelse(is.na(x$Hi), 'None', x$Hi)`  
+
+
+####TARGET
+This represents our response variables. It indicates the number of cases purchased. This is a numerical count variable.  
+
+```{r Target, echo=FALSE, message=FALSE, warning=FALSE}
+
+par(mfrow=c(1,2))
+# target_density <- density(wine_data$TARGET)
+# plot(target_density, main="Target Variable")
+# polygon(target_density, col="red", border="red")
+
+ggplot(wine_data_complete, aes(x = TARGET)) + 
+  geom_bar(fill = "red", width = 0.5) + 
+  xlab("Number of Cases ") + ylab("Frequency")
+
+boxplot(wine_data_complete$TARGET, main="Boxplot of the Target variable", col="blue")
+
+```
+
+***Extreme Values***  
+```{r Outliers_Target, echo=FALSE, message=FALSE, warning=FALSE}
+x <- get_outliers(wine_data_complete$TARGET)
+```
+
+Range  |  Values 
+-------|-------------
+Lowest | `r ifelse(is.na(x$Low), 'None', x$Low)`     
+Highest | `r ifelse(is.na(x$Hi), 'None', x$Hi)`   
+
+
+We would surmize that the data for the chemical content variables (Fixed Acidity, Volatile Acidity, Citric Acid, Redidual Sugar, Chlorides, and Sulphates) has been transformed. We would expect these variables to have positive values mostly measured in mg/l (mili-grams per liter) or in ppm (part-per-million). They appear to have been centered.  
+
+We will now explore the corlation between the variables.  
+
+
+
+##Variable to Variable Analysis  
+
+Now that we have completed our analysis of individual variables with will explore possible relation between variables.  
+
+###Correlation Analysis
+
+The correlation matrix shown below highlights correlations among several predictor variables. Correlation between between `Target` and `Stars` is high at 0.6. The second highest correlation is between the `Target` variable and `Label Appeal` at 0.4.
+
+
+
+
+```{r Correlation_Matrix, echo=FALSE, message=FALSE, warning=FALSE}
+
+ggcorr(wine_data_complete, method = "pairwise", label=TRUE, nbreaks=4)
+```
+
+The predictor Stars and Label Appear have the highest positive corelation with the response vaiable. As expected, the various acidity variables show some corelation with the Acidity Index and negative corelation with the pH.  
+
+Let us now look at the correlation between each response variable and the predictors.
+
+```{r corelation_predictors_to_Target, echo=FALSE, message=FALSE, warning=FALSE}
+
+cor(wine_data_complete$TARGET, wine_data_complete$FixedAcidity, use="complete.obs")
+cor(wine_data_complete$TARGET, wine_data_complete$VolatileAcidity, use="complete.obs")
+cor(wine_data_complete$TARGET, wine_data_complete$CitricAcid, use="complete.obs")
+cor(wine_data_complete$TARGET, wine_data_complete$ResidualSugar, use="complete.obs")
+cor(wine_data_complete$TARGET, wine_data_complete$Chlorides, use="complete.obs")
+cor(wine_data_complete$TARGET, wine_data_complete$FreeSulfurDioxide, use="complete.obs")
+cor(wine_data_complete$TARGET, wine_data_complete$TotalSulfurDioxide, use="complete.obs")
+cor(wine_data_complete$TARGET, wine_data_complete$Density, use="complete.obs")
+cor(wine_data_complete$TARGET, wine_data_complete$pH, use="complete.obs")
+cor(wine_data_complete$TARGET, wine_data_complete$Sulphates, use="complete.obs")
+cor(wine_data_complete$TARGET, wine_data_complete$Alcohol, use="complete.obs")
+cor(wine_data_complete$TARGET, wine_data_complete$LabelAppeal, use="complete.obs")
+cor(wine_data_complete$TARGET, wine_data_complete$AcidIndex, use="complete.obs")
+cor(wine_data_complete$TARGET, wine_data_complete$STARS, use="complete.obs")
+```
+
+###Multicollinearity
+
+This section will test the predictor variables to determine if there is correlation among them. Variance inflaction factor (VIF) is used to detect multicollinearity, specifically among the entire set of predictors versus within pairs of variables.
+
+Testing for collinearity among the predictor variables, we see that none of the numeric predictor variables appear to have a problem with collinearity based on their low VIF scores.  
+
+```{r VIF_Testing, echo=FALSE, message=FALSE, warning=FALSE}
+
+numeric_fields <- dplyr::select_if(wine_data_complete, is.numeric)[, 2:15]
+
+usdm::vifcor(numeric_fields) 
+```
+
+Since the VIF scores are closed to 1, there is no multicollinearity among factors.  
+
+### Relations between variables  
+
+We will now explore the relationships between the various predictors and between the response variables and each predictors. We will do so graphically with the air of a scatter plot. 
+
+```{r Scatter_Plot1, echo=FALSE, message=FALSE, warning=FALSE}
+
+scatterplotMatrix(~TARGET+STARS+LabelAppeal+ResidualSugar+Alcohol+Density, data=wine_data_complete, main="Scatter plot for Wine Data Set - Part 1")
+```
+
+```{r Scatter_Plot2, echo=FALSE, message=FALSE, warning=FALSE}
+
+scatterplotMatrix(~TARGET+AcidIndex+FixedAcidity+VolatileAcidity+CitricAcid+Chlorides+Sulphates+FreeSulfurDioxide+TotalSulfurDioxide, data=wine_data_complete, main="Scatter plot for Wine Data Set - Part 2")
+```
+
+From the plots, it is difficult to identify a relationship between the TARGET response and some of the predictors. Also, we have very low correlation between response and the predictors and between predictors even when would expect some. For example, we would have expected a negative corelation between Alcohol and Residual Sugars, a negative corelation betwen the pH and other various acidity variables (Fixedacidity, VolatileAcidity, and Citric Acid).
+
+#2. Data Preparation
+
+## Data Transformation  
+
+As indicated earlier, it appears that some of the predictors, mostly the chemical elements such as; Residual Sugar, Chloride, Free Sulur Dioxide, Total Sulfur Dioxide, Suphates, Fixed Acidity, and Volatile Acidity have skewed distribution. We will not consider further transformation on the data set now what missing values have been imputed except for changing some of predictors to categorical values; Stars and Label Apeal.
+
+```{r Categorical_Variables, echo=FALSE, message=FALSE, warning=FALSE}
+
+wine_data_complete$LabelAppeal <- as.factor(wine_data_complete$LabelAppeal)
+wine_data_complete$STARS <- as.factor(wine_data_complete$STARS)
+```
+
+#3.Model Buildings  
+
+We will now split our data set into a trainning data set and development evaluation data set. This will allow us to evaluate the accuracy of our models on a non-training data set to aliviate the risk of overfitting. For reproducibility we will upload our data sets to github.
+
+```{r split_trainning_set, echo=FALSE, message=FALSE, warning=FALSE}
+
+#split into test and training set
+set.seed(4784)
+idx <-createDataPartition(y=wine_data_complete$TARGET,p=0.7,list=FALSE)
+wine_dev_train <-wine_data_complete[idx,]
+wine_dev_test <-wine_data_complete[-idx,]
+
+options( scipen = 0 )
+
+write.csv(wine_data_complete, 'Wine_trainning_imputed.csv', row.names = F)
+write.csv(wine_dev_train, 'wine_dev_train.csv', row.names = F)
+write.csv(wine_dev_test, 'wine_dev_test.csv', row.names = F)
+```
+
+##3.1 Poisson Models  
+
+###Poisson Base model  
+
+The variance of the repsonse variable, the number of cases of wine sold, is larger than the mean - 3.710895 and 3.029074 respectively. Since the variace and mean are not equal, this is an indication the poisson condition has not been met. This is an indication of over dispersion.
+
+Over dispersion in the data means the MLE is correct but standard errors are wrong. Can use MLE but will need to correct the standard error.
+
+Examiniation of the out of the poisson model confirms over dispersion in the data. The residual deviance and the degrees of freedom indicates variance greater than 1. Due to the dispersion in the data, the standard error values cannot be used. The quasi poisson model will be calculated to correct for the incorrect standard error values.  
+
+```{r load_data_model, echo=FALSE, message=FALSE, warning=FALSE}
+wine_data_dev_train <- read.csv("https://raw.githubusercontent.com/621-Group2/HW5/master/wine_dev_train.csv")
+wine_data_dev_test <- read.csv("https://raw.githubusercontent.com/621-Group2/HW5/master/wine_dev_test.csv")
+
+#https://www.youtube.com/watch?v=mgIyPRhrVTY
+#Base model
+p1 <- glm(TARGET ~ ., family = poisson, data = wine_data_dev_train)
+summary(p1)
+```
+
+###Quasi Poisson Model  
+
+The Quasi Poission model corrects the standard where there is dispersion in the data. The standard error of the Quasi Poission model is lorger than that of the Poisson model.  
+
+```{r Quasi_Poisson, echo=FALSE, message=FALSE, warning=FALSE}
+#This model is run to correct for the standard errors
+p2 <- glm(TARGET ~ ., family = quasipoisson(), data = wine_data_dev_train)
+summary(p2)
+
+#Combine outcomes of the 2 models
+library(arm)
+Poisson_coef = coef(p1)
+Quasi_coef = coef(p2)
+PoissonSE = se.coef(p1)
+QuasiSE = se.coef(p2)
+cbind(Poisson_coef, PoissonSE, Quasi_coef, QuasiSE)
+
+```
+
+##Poisson Model - Significant Predictors  
+
+This model is based on the predictor variables that were significant from the Quasi Poisson model above.
+
+```{r Poisson_Significant, echo=FALSE, message=FALSE, warning=FALSE}
+
+p3 <- glm(TARGET ~ VolatileAcidity+CitricAcid+Chlorides+FreeSulfurDioxide+TotalSulfurDioxide+
+              Density+pH+Sulphates+Alcohol+LabelAppeal+AcidIndex+STARS, 
+          family = poisson, data = wine_data_dev_train)
+summary(p3)
+
+#Extra-Poisson Variation
+#http://data.princeton.edu/wws509/r/overdispersion.html
+
+```
+
+##Goodness of Fit of Poisson Model - Significant Predictors
+
+The Pearson Chi Squared and deviance tests were used to test the goodness of fit. The residual difference is the difference between the deviance of the current model and the maximum deviance of the ideal model where the predicted values are identical to the observed.
+
+Since this goodness of fit test is not signifcant $p>.05$ this is an indication that the model fits the data - all the variablility in the data are explained.
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+with(p3, cbind(res.deviance = deviance, df = df.residual,
+  p <- pchisq(deviance, df.residual, lower.tail=FALSE)))
+```
+
+##Poisson Model Diagnosis  
+
+The QQ plot residulas show there is little deviation from the expected distribution. The Resiual vs. Predicted shows there is little despersion in the data.  
+
+```{r Poisson_Plot, echo=FALSE, message=FALSE, warning=FALSE}
+
+library(DHARMa)
+
+res = simulateResiduals(p3)
+plot(res)
+
+```
+
+##3.2 Negaive Binomial Models  
+
+### Negative binomial base model
+Negative binomial regression can be used for over-dispersed count data, that is when the conditional variance exceeds the conditional mean. It can be considered as a generalization of Poisson regression since it has the same mean structure as Poisson regression and it has an extra parameter to model the over-dispersion. If the conditional distribution of the outcome variable is over-dispersed, the confidence intervals for the Negative binomial regression are likely to be narrower as compared to those from a Poisson regression model.
+
+First we performed a base negative binomial regression model. We also calculated and compared the mean and variance of the data set, and saw the variance aws over 20% larer than the mean.
+
+```{r glm.nb, echo=FALSE, message=FALSE, warning=FALSE}
+
+mean(wine_data_dev_train$TARGET)
+var(wine_data_dev_train$TARGET)
+
+m1.lm.nb <- glm.nb(TARGET ~ ., data = wine_data_dev_train)
+summary.glm(m1.lm.nb)
+
+```
+
+
+
+The second negative binomial regression model included backward + forward selection 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+m2.lm.nb <-  stepAIC(m1.lm.nb, direction = 'both')
+```
+
+The bi-directional stepwise regression model that chose the variables `VolatileAcidity`, `CitricAcid`, `Chlorides`, `FreeSulfurDioxide`, `TotalSulfurDioxide`, `pH`,  `Sulphates`, `Alcohol`, `LabelAppeal`, `AcidIndex`, and `STARS` reduced the AIC value to 32674, which is slightly lower than the base model.
+
+
+##Goodness of Fit of Negative Binomial Model - Significant Predictors
+Since this goodness of fit test is not signifcant $p>.05$ this is an indication that the model fits the data - all the variablility in the data are explained.
+```{r}
+with(m2.lm.nb, cbind(res.deviance = deviance, df = df.residual,
+  p <- pchisq(deviance, df.residual, lower.tail=FALSE)))
+```
+
+
+
+##Negative Binomial Model Diagnosis  
+```{r}
+
+anova(m1.lm.nb, m2.lm.nb, test = "Chisq")
+res = simulateResiduals(m2.lm.nb)
+plot(res)
+```
+
+
+
+##3.3 Multilinear Models  
+
+One concern with using multilinear model to predict count data could lead to negative result unlike when using Negative Binomial or Poisson model. We will explore these models in later sections.  
+
+The first model we will build is a multilinear models. We will build this first model manually to keep control on the building process. We will use the anova testing as we continue to add variables in our model to confirm that the variables we are adding increase contribution to our models.  
+
+### Model a - Manual Multilinear model  
+We select to build our model with predictors STARS and LABELAPPEAL; these variables have the highest correlation with our response variable, TARGET.  
+
+```{r lma_initial, echo=FALSE, message=FALSE, warning=FALSE}
+
+m.lm.a1 <- lm(TARGET~STARS+LabelAppeal, data=wine_dev_train)
+
+summary(m.lm.a1)
+```
+
+The F-statistic of 4572 and p-value < 2.2e-16, clearly subject that we should reject the null hypothesis that predictors STARS and LabelAppeal have collectively no affect on response variable TARGET.  However, our adjusted R^2 is only of 0.5051. 
+
+Let us consider adding the variable AcidityIndex and determine whether this improve the model.  
+
+```{r lma_second, echo=FALSE, message=FALSE, warning=FALSE}
+
+m.lm.a2 <- lm(TARGET~STARS+LabelAppeal+AcidIndex, data=wine_dev_train)
+
+summary(m.lm.a2)
+
+```
+Adjusted R^2 is slightly better. We will perform anova test to compare the 2.  
+
+```{r lma_anova1, echo=FALSE, message=FALSE, warning=FALSE}
+
+anova(m.lm.a1, m.lm.a2)
+```
+
+Based on the F value and p-value, we are rejecting the null hypothesis that coefficient AcidIndex = 0. We will continue by adding Alcohol. We would expect Alcohol to have a positive relationship with TARGET and again we will test our model.  
+
+```{r lma_3rd, echo=FALSE, message=FALSE, warning=FALSE}
+
+m.lm.a3 <- lm(TARGET~STARS+LabelAppeal+AcidIndex+Alcohol, data=wine_dev_train)
+summary(m.lm.a3)
+anova(m.lm.a2, m.lm.a3)
+```
+
+Again from the F-value and p-value, we will reject the hypothesis that the coefficient of Alcohol = 0, Adjusted R^2 has increase slightly. We will now consider Residual Sugar, although Residual Sugar is negatively correlated to Alcohol, sweet wines are raising in popularity. 
+```{r r lma_4th, echo=FALSE, message=FALSE, warning=FALSE}
+
+m.lm.a4 <- lm(TARGET~STARS+LabelAppeal+AcidIndex+Alcohol+ResidualSugar, data=wine_dev_train)
+summary(m.lm.a4)
+anova(m.lm.a3, m.lm.a4)
+
+
+```
+Adjusted R^2 has not improved and and based on the F and p-value we would failed to regject to null hypothesis that the coefficint of Residual Sugar is 0. Let us adding Citric Acid; Citric Acid in wine gives it freshness. This may be a desirable feature of a wine.
+
+```{r lma_5th, echo=FALSE, message=FALSE, warning=FALSE}
+
+m.lm.a5 <- lm(TARGET~STARS+LabelAppeal+AcidIndex+Alcohol+CitricAcid, data=wine_dev_train)
+summary(m.lm.a5)
+anova(m.lm.a3, m.lm.a5)
+```
+
+We have a very slight increase in adjusted R^2. The F value and p-statistic support the rejection of the null hypothesis that coefficient of Citri Acid is null.  
+
+We will now consider adding Volatil Acidity, we assume that all acidity indicators were contains in the Acidity Index but Volatil Acidity correspond to Acetic Acid in wine (vinegar) that is highly undesirable.
+
+```{r lma_6th, echo=FALSE, message=FALSE, warning=FALSE}
+
+m.lm.a6 <- lm(TARGET~STARS+LabelAppeal+AcidIndex+Alcohol+CitricAcid+VolatileAcidity, data=wine_dev_train)
+summary(m.lm.a6)
+anova(m.lm.a5, m.lm.a6)
+```
+
+The adjusted R^2 value increase and the F and p-value support rejecting the null hypothesis that the coefficient of Volatil Acidity is zero. Finally we will consider to add the level of Sulphites to our model. Free Sulfur Dioxide prevents oxidation in wine and helps preserve it. 
+
+```{r lma_7th, echo=FALSE, message=FALSE, warning=FALSE}
+
+m.lm.a7 <- lm(TARGET~STARS+LabelAppeal+AcidIndex+Alcohol+CitricAcid+VolatileAcidity + FreeSulfurDioxide, data=wine_dev_train)
+summary(m.lm.a7)
+anova(m.lm.a6, m.lm.a7)
+```
+
+The Adjusted R^2 increase and based on the F-value and p-value, we will reject the null hypothesis that the coefficient for Free Sulfur Dioxide is null. 
+
+We will consider this our first multiple linear model. We would not look at the residual plots to evaluate how good fit is the model.  
+
+#### Plots Diagnostics  
+
+```{r lm.modela diagnostics, echo=FALSE, message=FALSE, warning=FALSE}
+#Diagnostic plots
+autoplot(m.lm.a7, which = 1:6, colour = 'dodgerblue3',
+         smooth.colour = 'red', smooth.linetype = 'dashed',
+         ad.colour = 'black',
+         label.size = 3, label.n = 5, label.colour = 'blue',
+         ncol = 3)
+```
+
+***Residual Plot***  
+From this plot we observed that we have residuals shows some pattern It appears that some relationship have not been accounted for in the model.  
+
+***Normal Q-Q Plot***  
+From this plot we observed that distribution of the residuals is fairly normal. 
+
+***Scale-Location Plot***  
+Fom this plot we observed that the residuals are not quite equally spread along the range of predictors. Thus, the variance is not equal.  
+
+***Residuals vs Leverage points***  
+From the bottom 3 plots, we observed that we have some influencial point beyond Cook's distances.  
+
+#### Model Interpretation  
+
+We will now look at the coefficients of our model; 
+
+```{r lm.modela coefficients, echo=FALSE, message=FALSE, warning=FALSE}
+
+m.lm.a7.coefficients <- as.data.frame(m.lm.a7$coefficients)
+colnames(m.lm.a7.coefficients) <- c("Values")
+
+kable(m.lm.a7.coefficients)
+
+
+```
+
+* __STARS:__ Wines with better rating (higher stars) will most likely sell higher number of cases than wines with lower rating. This is as we would expect.  
+
+* __LabelAppearl:__ Wines with higher label appeal will most likely sell higher number of cases than wines with lower label appear. Although the label design has no bearing on the quality of a wine this result is not surprising since some customers will select a wine based on the label.  
+
+* __AcidIndex__: Wines with higher Acid Index will most likely sell lower number of cases than wines with a lower Acid Index.  
+
+* __Alcool__: Wines with higher Alcohol content will most likely sell higher number of cases than wines with less Alcohol.  
+
+* __CitricAcid__: Wines with higher levels of Citric Acid will sell higher number of cases than wines with lower levels.  
+
+* __VolatileAcidity__: Wines with higher levels of VolatileAcidity will sell lower number of cases than wines with lower levels.  
+
+* __FreeSulfurDioxide__: Wines with higher levels of Free Sulfur Dioxide will sell higher number of cases than wines with lower levels. 
+
+### Model b - Backward Multiple Linear Model using AIC  
+We will now use the Backward method leveraging AIC to find another multiple linear model.  
+
+```{r lmb_initial, echo=FALSE, message=FALSE, warning=FALSE}
+
+m.lm.full <- lm(TARGET ~ STARS + LabelAppeal +Density +Alcohol + ResidualSugar +
+                         pH + FixedAcidity + VolatileAcidity + CitricAcid +
+                         Sulphates + FreeSulfurDioxide + TotalSulfurDioxide + Chlorides, data = wine_dev_train)
+
+m.lm.b1 <- step(m.lm.full, direction = "backward", trace=FALSE ) 
+
+summary(m.lm.b1)
+```
+
+#### Plots Diagnostics  
+
+```{r lm.modelb diagnostics, echo=FALSE, message=FALSE, warning=FALSE} 
+
+#Diagnostic plots
+autoplot(m.lm.b1, which = 1:6, colour = 'dodgerblue3',
+         smooth.colour = 'red', smooth.linetype = 'dashed',
+         ad.colour = 'black',
+         label.size = 3, label.n = 5, label.colour = 'blue',
+         ncol = 3)
+```
+
+***Residual Plot***  
+From this plot we observed that we have residuals shows some pattern It appears that some relationship have not been accounted for in the model.  
+
+***Normal Q-Q Plot***  
+From this plot we observed that distribution of the residuals is fairly normal. 
+
+***Scale-Location Plot***  
+Fom this plot we observed that the residuals are not quite equally spread along the range of predictors. Thus, the variance is not equal.  
+
+***Residuals vs Leverage points***  
+From the bottom 3 plots, we observed that we have some influencial point beyond Cook's distances.  
+
+```{r lm.modelb coefficients, echo=FALSE, message=FALSE, warning=FALSE}
+
+m.lm.b1.coefficients <- as.data.frame(m.lm.b1$coefficients)
+colnames(m.lm.b1.coefficients) <- c("Values")
+
+kable(m.lm.b1.coefficients)
+
+
+```
+
+* __STARS:__ Wines with better rating (higher stars) will most likely sell higher number of cases than wines with lower rating. This is as we would expect.  
+
+* __LabelAppearl:__ Wines with higher label appeal will most likely sell higher number of cases than wines with lower label appear. Although the label design has no bearing on the quality of a wine this result is not surprising since some customers will select a wine based on the label.  
+
+* __Alcool__: Wines with higher Alcohol content will most likely sell higher number of cases than wines with less Alcohol.  
+
+* __FixedAcidity__: Wines with higher levels of FixedAcidity will sell lower number of cases than wines with lower levels. 
+
+* __VolatileAcidity__: Wines with higher levels of VolatileAcidity will sell lower number of cases than wines with lower levels.  
+
+* __Sulphates__: Wines with higher Sulphates levels will most likely sell lower number of cases than wines with a lower Sulphates levels.  
+
+* __FreeSulfurDioxide__: Wines with higher levels of Free Sulfur Dioxide will sell higher number of cases than wines with lower levels.
+
+* __TotalSulfurDioxide__: Wines with higher levels of Total Sulfur Dioxide will sell higher number of cases than wines with lower levels. 
+
+* __Chlorides__: Wines with higher levels of Chlorides will sell lower number of cases than wines with lower levels. 
+
+#### Multilinear Models Comparison  
+
+To compare our 2 multilinear models, we will use Adjusted R^2, AIC, and accuracy on prediction for our dev-Evaluation data set.  
+
+```{r lm_comparison, echo=FALSE, message=FALSE, warning=FALSE}
+# predict on test data
+predicted_lm.a <- round(predict(m.lm.a7, wine_dev_test),0) 
+predicted_lm.b <- round(predict(m.lm.b1, wine_dev_test),0)  
+
+# Extact Actual values for TARGET  
+actual <-    wine_dev_test$TARGET
+compare.a <- cbind (actual=actual, predicted_lm.a)  # combine
+compare.b <- cbind (actual=actual, predicted_lm.b)
+
+#Metrics for Model a
+model_accuracy.a <- mean (apply(compare.a, 1, min)/apply(compare.a, 1, max))
+RMSE.a <- Metrics::rmse(compare.a[, 1], compare.a[, 2])                  #RMSE calculates the root mean squared error
+SSE.a <-  sum((compare.a[,1]-compare.a[,2])^2)                           #Sum of Square Errors 
+Adj_R_sq.a <- summary(m.lm.a7)$adj.r.squared
+AIC.a <- round(AIC(m.lm.a7), 3)
+BIC.a <- round(BIC(m.lm.a7), 3)
+
+#Metrics for Model a
+model_accuracy.b <- mean (apply(compare.b, 1, min)/apply(compare.b, 1, max))
+RMSE.b <- Metrics::rmse(compare.b[, 1], compare.b[, 2])                  #RMSE calculates the root mean squared error
+SSE.b <-  sum((compare.b[,1]-compare.b[,2])^2)                           #Sum of Square Errors 
+Adj_R_sq.b <- summary(m.lm.b1)$adj.r.squared
+AIC.b <- round(AIC(m.lm.b1), 3)
+BIC.b <- round(BIC(m.lm.b1), 3)
+
+m.lm.a_measures <- c('LM.Modela', model_accuracy.a, RMSE.a, SSE.a, Adj_R_sq.a, AIC.a, BIC.a)
+m.lm.b_measures <- c('LM.Modelb', model_accuracy.b, RMSE.b, SSE.b, Adj_R_sq.b, AIC.b, BIC.b)
+
+lm.comparison <- rbind(unname(m.lm.a_measures), unname(m.lm.b_measures))
+
+colnames(lm.comparison) <- c('Model', 'Accuracy', 'RMSE', 'SSE', 'AdjRSquared', 'ACI', 'BIC')
+
+kable(lm.comparison)
+
+```
+
+From the table of measures, we would select our linear model a.  
+
+#4.Model Selection  
+
+
+
+
+
+
+
+
+
+#References:
+***Wines Component Analysis***  
+http://winefolly.com/tutorial/the-lightest-to-the-strongest-wine/
+http://winefolly.com/review/understanding-acidity-in-wine/
+https://www.wineperspective.com/wine-acidity/
+http://waterhouse.ucdavis.edu/
+http://www.scielo.br/scielo.php?script=sci_arttext&pid=S0101-20612015000100095
+http://morewinemaking.com/public/pdf/so2.pdf
+http://winefolly.com/tutorial/alcohol-content-in-wine/
+https://winemakermag.com/501-measuring-residual-sugar-techniques
+
+***Technical References***
+https://www.youtube.com/watch?v=u8XvfhBdbMw  
+http://data.library.virginia.edu/diagnostic-plots/  
+http://www.stat.wisc.edu/~ane/st572/notes/lec05.pdf  
+
+Poision:  
+#https://www.youtube.com/watch?v=mgIyPRhrVTY  
+
+
